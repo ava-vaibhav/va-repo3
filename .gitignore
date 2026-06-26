@@ -1,0 +1,17 @@
+# Local secrets — never commit
+pem/
+*.pem
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# CI / repo tooling — excluded from Versori CLI deploy (versori projects deploy respects .gitignore)
+deploy.py
+generate_jwt.py
+requirements.txt
+.github/
+README.md
+.versori-cli/

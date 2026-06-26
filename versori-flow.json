@@ -1,0 +1,65 @@
+{
+  "nodes": [
+    {
+      "id": "get-issuers",
+      "type": "baseNode",
+      "position": { "x": 300, "y": 50 },
+      "data": {
+        "id": "get-issuers",
+        "label": "get-issuers",
+        "description": "Synchronous webhook trigger that accepts a POST request containing a bearer token, tax year, and correlation ID supplied by the end user. The integration runs the full pipeline inline and returns the Avalara issuers response directly to the caller.",
+        "nodeKind": "webhook",
+        "files": ["src/workflows/get-issuers.ts"],
+        "position": { "x": 300, "y": 50 },
+        "steps": [
+          "Listens for POST requests at /webhooks/get-issuers",
+          "Expects a JSON body with bearerToken, taxYear, and xCorrelationId",
+          "Runs in sync response mode — the HTTP response is held open until the pipeline completes"
+        ]
+      }
+    },
+    {
+      "id": "validate-input",
+      "type": "baseNode",
+      "position": { "x": 300, "y": 125 },
+      "data": {
+        "id": "validate-input",
+        "label": "validate-input",
+        "description": "Guards downstream steps by asserting all three required fields are present in the request body. Any missing field causes an immediate error that propagates back to the caller as a failed sync response.",
+        "nodeKind": "action",
+        "files": ["src/workflows/get-issuers.ts"],
+        "position": { "x": 300, "y": 125 },
+        "steps": [
+          "Reads bearerToken, taxYear, and xCorrelationId from the webhook request body",
+          "Throws a descriptive error if any field is absent or null",
+          "Logs the validated taxYear and xCorrelationId at info level",
+          "Returns the typed GetIssuersRequest object for the next step"
+        ]
+      }
+    },
+    {
+      "id": "call-avalara-get-issuers",
+      "type": "baseNode",
+      "position": { "x": 300, "y": 200 },
+      "data": {
+        "id": "call-avalara-get-issuers",
+        "label": "call-avalara-get-issuers",
+        "description": "Makes an authenticated GET request to the Avalara 1099 ListIssuers endpoint using the avalara_1099 connection. The caller-supplied bearer token overrides the connection-level auth, and results are filtered server-side to the requested tax year.",
+        "nodeKind": "request",
+        "files": ["src/workflows/get-issuers.ts"],
+        "position": { "x": 300, "y": 200 },
+        "steps": [
+          "Builds the URL /1099/issuers?$filter=taxYear eq {taxYear} using an OData filter",
+          "Sets Authorization header to the caller-supplied bearerToken (must include 'Bearer ' prefix)",
+          "Sets avalara-version: 2.0 and X-Correlation-Id headers",
+          "Throws a descriptive error on any non-2xx response, including the status code and body",
+          "Returns the parsed PaginatedIssuersResponse (value[], count, nextLink) to the webhook caller"
+        ]
+      }
+    }
+  ],
+  "edges": [
+    { "id": "get-issuers-to-validate-input", "source": "get-issuers", "target": "validate-input" },
+    { "id": "validate-input-to-call-avalara-get-issuers", "source": "validate-input", "target": "call-avalara-get-issuers" }
+  ]
+}
