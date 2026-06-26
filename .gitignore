@@ -9,9 +9,9 @@ __pycache__/
 .env
 
 # CI / repo tooling — excluded from Versori CLI deploy (versori projects deploy respects .gitignore)
-deploy.py
+#deploy.py
 generate_jwt.py
 requirements.txt
-.github/
+#.github/
 README.md
 .versori-cli/

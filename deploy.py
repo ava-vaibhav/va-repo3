@@ -25,12 +25,14 @@ Optional configuration:
 - VERSORI_CLI_VERSION (pin CLI release tag)
 - VERSORI_CLI_INSTALL_DIR (default: .versori-cli/bin)
 - VERSORI_DEPLOY_ASSETS (true/false)
+- VERSORI_DEBUG (true/false; verbose logging with --debug or --dry-run)
 
 CI/tooling files at repo root are excluded from deploy via .gitignore
 (versori projects deploy respects .gitignore patterns).
 
 Examples:
   python deploy.py --branch cicd-test --dry-run
+  python deploy.py --branch cicd-test --debug
   python deploy.py --branch cicd-test
 """
 
@@ -111,6 +113,53 @@ def mask_token(token: str) -> str:
     return f"{token[:8]}...{token[-4:]}"
 
 
+def is_debug_mode(args: argparse.Namespace) -> bool:
+    """Enable verbose pipeline logging for local testing, dry-run, or explicit debug."""
+    return (
+        getattr(args, "debug", False)
+        or parse_bool(os.getenv("VERSORI_DEBUG"))
+        or args.dry_run
+    )
+
+
+def log_pipeline_step(step: int, total: int, message: str) -> None:
+    print(f"[pipeline {step}/{total}] {message}")
+
+
+def log_cli_command(argv: list[str]) -> None:
+    printable = " ".join(shlex.quote(part) for part in argv)
+    print(f"cli_command: {printable}")
+
+
+def run_cli(
+    argv: list[str],
+    *,
+    input_text: str | None = None,
+    debug: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run a CLI command with pre-execution logging and captured output."""
+    log_cli_command(argv)
+    if input_text is not None:
+        if debug:
+            print(f"cli_stdin: {input_text}")
+        else:
+            print(f"cli_stdin: <redacted, length={len(input_text)}>")
+
+    result = subprocess.run(
+        argv,
+        input=input_text,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    print(f"cli_exit_code: {result.returncode}")
+    if result.stdout:
+        print(f"cli_stdout:\n{result.stdout.rstrip()}")
+    if result.stderr:
+        print(f"cli_stderr:\n{result.stderr.rstrip()}", file=sys.stderr)
+    return result
+
+
 def parse_bool(value: str | bool | None) -> bool:
     if isinstance(value, bool):
         return value
@@ -184,16 +233,12 @@ def download_file(url: str, destination: Path) -> None:
         destination.write_bytes(response.read())
 
 
-def ensure_versori_cli(cli_version: str | None = None) -> Path:
+def ensure_versori_cli(cli_version: str | None = None, *, debug: bool = False) -> Path:
     """Install Versori CLI to a writable directory if not already on PATH."""
     existing = shutil.which("versori")
     if existing:
-        result = subprocess.run(
-            ["versori", "version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        version_argv = ["versori", "version"]
+        result = run_cli(version_argv, debug=debug)
         if result.returncode == 0:
             print(f"versori_cli: {existing} (already on PATH)")
             return Path(existing)
@@ -217,13 +262,16 @@ def ensure_versori_cli(cli_version: str | None = None) -> Path:
 
     print(f"versori_cli_install: {version} ({os_name}/{arch})")
     print(f"versori_cli_url: {archive_url}")
+    print(f"versori_cli_checksums_url: {checksums_url}")
 
     with tempfile.TemporaryDirectory(prefix="versori-cli-") as tmp:
         tmp_path = Path(tmp)
         archive_path = tmp_path / archive_name
         checksums_path = tmp_path / "checksums.txt"
 
+        print(f"cli_download: {archive_url} -> {archive_path}")
         download_file(archive_url, archive_path)
+        print(f"cli_download: {checksums_url} -> {checksums_path}")
         download_file(checksums_url, checksums_path)
 
         expected_sum = ""
@@ -249,31 +297,28 @@ def ensure_versori_cli(cli_version: str | None = None) -> Path:
     return binary_path
 
 
-def setup_versori_context(versori_bin: Path, org_id: str, jwt_token: str) -> Path:
+def setup_versori_context(
+    versori_bin: Path, org_id: str, jwt_token: str, *, debug: bool = False
+) -> Path:
     """Create ephemeral CLI config and add JWT context."""
     config_fd, config_path_str = tempfile.mkstemp(prefix="versori-config-", suffix=".yaml")
     os.close(config_fd)
     config_path = Path(config_path_str)
 
-    result = subprocess.run(
-        [
-            str(versori_bin),
-            "--config",
-            str(config_path),
-            "context",
-            "add",
-            "--name",
-            CONTEXT_NAME,
-            "--organisation",
-            org_id,
-            "--jwt",
-            "-",
-        ],
-        input=jwt_token,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    context_argv = [
+        str(versori_bin),
+        "--config",
+        str(config_path),
+        "context",
+        "add",
+        "--name",
+        CONTEXT_NAME,
+        "--organisation",
+        org_id,
+        "--jwt",
+        "-",
+    ]
+    result = run_cli(context_argv, input_text=jwt_token, debug=debug)
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(f"versori context add failed: {stderr}")
@@ -395,16 +440,8 @@ def build_versori_deploy_argv(
     return argv
 
 
-def run_versori_deploy(argv: list[str]) -> int:
-    printable = " ".join(shlex.quote(part) for part in argv)
-    print(f"versori_command: {printable}")
-
-    result = subprocess.run(argv, capture_output=True, text=True, check=False)
-    if result.stdout:
-        print(result.stdout.rstrip())
-    if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
-
+def run_versori_deploy(argv: list[str], *, debug: bool = False) -> int:
+    result = run_cli(argv, debug=debug)
     return result.returncode
 
 
@@ -467,6 +504,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Pass --dry-run to versori projects deploy (list files, no upload).",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Verbose pipeline logging: full JWT, CLI commands, and step progress. "
+            "Also enabled when VERSORI_DEBUG=true or --dry-run is set."
+        ),
+    )
     return parser
 
 
@@ -474,19 +519,26 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     config_path: Path | None = None
+    pipeline_steps = 7
 
     try:
-        branch = read_branch(args.branch)
+        debug_mode = is_debug_mode(args)
         in_ci = os.getenv("GITHUB_ACTIONS") == "true"
+
+        log_pipeline_step(1, pipeline_steps, "Resolving deployment context")
+        branch = read_branch(args.branch)
         commit_sha = read_commit_sha()
         deploy_dir = resolve_deploy_directory(args.directory)
 
         print("=== Deployment context ===")
         print(f"branch: {branch}")
         print(f"deploy_directory: {deploy_dir}")
+        print(f"commit_sha: {commit_sha or '(not set)'}")
         print(f"timestamp_utc: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
         print(f"ci_run: {in_ci}")
+        print(f"debug_mode: {debug_mode}")
 
+        log_pipeline_step(2, pipeline_steps, "Loading credentials and configuration")
         private_key = read_private_key()
         signing_key_id = read_required_value(
             args.signing_key_id, "VERSORI_SIGNING_KEY_ID"
@@ -500,7 +552,11 @@ def main() -> int:
         version = build_deploy_version_name(branch, commit_sha, args.version)
         description = build_deploy_description(branch, commit_sha, args.description)
         upload_assets = args.assets or parse_bool(os.getenv("VERSORI_DEPLOY_ASSETS"))
+        print(f"org_id: {org_id}")
+        print(f"signing_key_id: {signing_key_id}")
+        print(f"external_user_id: {external_user_id}")
 
+        log_pipeline_step(3, pipeline_steps, "Generating Versori JWT")
         token = sign_versori_jwt(
             private_key=private_key,
             signing_key_id=signing_key_id,
@@ -512,17 +568,24 @@ def main() -> int:
         print(f"issuer: https://versori.com/sk/{signing_key_id}")
         print(f"subject: {external_user_id}")
         print(f"token_lifetime_seconds: {args.lifetime_seconds}")
-        displayed_token = mask_token(token) if in_ci else token
-        print(f"jwt_token: {displayed_token}")
+        if debug_mode or not in_ci:
+            print(f"jwt_token: {token}")
+        else:
+            print(f"jwt_token: {mask_token(token)}")
         print(f"project_id: {project_id}")
         print(f"environment: {environment}")
         print(f"version: {version}")
         print(f"description: {description}")
         print(f"upload_assets: {upload_assets}")
+        print(f"dry_run: {args.dry_run}")
 
-        versori_bin = ensure_versori_cli(args.cli_version)
-        config_path = setup_versori_context(versori_bin, org_id, token)
+        log_pipeline_step(4, pipeline_steps, "Installing or locating Versori CLI")
+        versori_bin = ensure_versori_cli(args.cli_version, debug=debug_mode)
 
+        log_pipeline_step(5, pipeline_steps, "Configuring Versori CLI context (JWT auth)")
+        config_path = setup_versori_context(versori_bin, org_id, token, debug=debug_mode)
+
+        log_pipeline_step(6, pipeline_steps, "Building deploy command")
         deploy_argv = build_versori_deploy_argv(
             versori_bin,
             config_path,
@@ -534,13 +597,18 @@ def main() -> int:
             dry_run=args.dry_run,
             upload_assets=upload_assets,
         )
+        print(f"deploy_argv_ready: {len(deploy_argv)} arguments")
 
+        log_pipeline_step(7, pipeline_steps, "Executing versori projects deploy")
         if args.dry_run:
             print("Dry run enabled. versori projects deploy --dry-run will list files only.")
 
-        exit_code = run_versori_deploy(deploy_argv)
+        exit_code = run_versori_deploy(deploy_argv, debug=debug_mode)
         if exit_code != 0:
             print(f"versori_exit_code: {exit_code}", file=sys.stderr)
+            log_pipeline_step(7, pipeline_steps, f"Deploy failed (exit_code={exit_code})")
+        else:
+            log_pipeline_step(7, pipeline_steps, "Deploy completed successfully")
         return 0 if exit_code == 0 else 1
 
     except Exception as exc:  # noqa: BLE001
