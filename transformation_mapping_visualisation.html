@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Get Issuers – Integration Mapping</title>
+  <style>
+    :root {
+      --bg: #f9f9f9;
+      --surface: #f9fafb;
+      --surface-2: #f3f4f6;
+      --fg: #1a1a1a;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --border-strong: #d1d5db;
+      --accent: #2563eb;
+      --required: #b91c1c;
+      --optional: #6b7280;
+      --transform: #c2410c;
+      --computed: #7c3aed;
+      --direct: #047857;
+      --type-num: #047857;
+      --type-str: #2563eb;
+      --type-bool: #c2410c;
+      --type-null: #b91c1c;
+    }
+    html.dark {
+      --bg: #191919;
+      --surface: #1e293b;
+      --surface-2: #334155;
+      --fg: #f1f5f9;
+      --muted: #cbd5e1;
+      --border: #475569;
+      --border-strong: #64748b;
+      --accent: #60a5fa;
+      --required: #fca5a5;
+      --optional: #cbd5e1;
+      --transform: #fdba74;
+      --computed: #c4b5fd;
+      --direct: #6ee7b7;
+      --type-num: #6ee7b7;
+      --type-str: #93c5fd;
+      --type-bool: #fdba74;
+      --type-null: #fca5a5;
+    }
+    * { box-sizing: border-box; }
+    html { overscroll-behavior: none; }
+    body { margin: 0; padding: 2rem 1.25rem; font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+    .container { max-width: 1080px; margin: 0 auto; }
+    h2 { font-size: 1.05rem; margin: 1.75rem 0 .75rem; padding-bottom: .25rem; border-bottom: 1px solid var(--border); }
+    h3 { font-size: .95rem; margin: .5rem 0; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface); padding: .1rem .35rem; border-radius: 3px; border: 1px solid var(--border); }
+
+    .page-head { display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2rem; }
+    .title-block h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+    .title-block .subtitle { color: var(--muted); margin: 0; }
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; }
+    @media (max-width: 640px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; display: flex; flex-direction: column; gap: .15rem; }
+    .kpi-value { font-size: 1.5rem; font-weight: 600; color: var(--fg); }
+    .kpi-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .timeline { list-style: none; margin: 0; padding: 0; display: flex; gap: .85rem; flex-wrap: wrap; }
+    .timeline-step { flex: 1 1 0; min-width: 150px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .6rem .85rem; display: flex; flex-direction: column; gap: .15rem; position: relative; }
+    .timeline-step + .timeline-step::before { content: "›"; position: absolute; left: -.65rem; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 700; font-size: 1rem; }
+    .timeline-step .step-kind { font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .timeline-step .step-name { font-weight: 500; }
+    .timeline-step.trigger { border-left: 3px solid var(--accent); }
+    .timeline-step.filter  { border-left: 3px solid var(--transform); }
+    .timeline-step.action  { border-left: 3px solid var(--direct); }
+
+    .toggle-tech { position: absolute; opacity: 0; pointer-events: none; }
+    .doc-toolbar { display: flex; justify-content: flex-end; margin: 0 0 1.5rem; }
+    .toggle-tech-label { display: inline-flex; align-items: center; gap: .55rem; cursor: pointer; user-select: none; font-size: .85rem; color: var(--muted); }
+    .toggle-tech-label:hover { color: var(--fg); }
+    .toggle-thumb { display: inline-block; width: 28px; height: 16px; background: var(--border-strong); border-radius: 999px; position: relative; transition: background .15s; flex-shrink: 0; }
+    .toggle-thumb::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; background: var(--bg); border-radius: 50%; transition: left .15s; }
+    body:has(.toggle-tech:checked) .toggle-thumb { background: var(--accent); }
+    body:has(.toggle-tech:checked) .toggle-thumb::after { left: 14px; }
+    body:has(.toggle-tech:focus-visible) .toggle-thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+    body:has(.toggle-tech:not(:checked)) .m-detail { display: none; }
+    body:has(.toggle-tech:not(:checked)) .example { display: none; }
+
+    .field-flow { display: grid; grid-template-columns: 1fr 160px 1fr; grid-template-rows: auto auto auto; gap: 0; align-items: start; margin: 1rem 0; }
+    .ff-head { margin: 0 0 .5rem; font-size: .95rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .ff-head-source { grid-column: 1; grid-row: 1; }
+    .ff-head-target { grid-column: 3; grid-row: 1; }
+    .ff-fields { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .ff-source { grid-column: 1; grid-row: 2; border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+    .ff-target { grid-column: 3; grid-row: 2; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; }
+    .ff-fields li { height: 36px; display: flex; align-items: center; gap: .5rem; padding: 0 .75rem; border-bottom: 1px solid var(--border); font-size: .9rem; }
+    .ff-fields li:last-child { border-bottom: 0; }
+    .ff-connectors { grid-column: 2; grid-row: 2; display: block; width: calc(100% + 8px); margin-left: -12px; margin-right: 4px; height: var(--ff-height, 108px); overflow: visible; }
+    .link { fill: none; stroke-width: 0.06; }
+    .link.direct    { stroke: var(--direct); }
+    .link.transform { stroke: var(--transform); }
+    .link.computed  { stroke: var(--computed); stroke-dasharray: 0.18 0.10; }
+    .ff-legend { grid-column: 1 / -1; grid-row: 3; list-style: none; margin: .5rem 0 0; padding: 0; display: flex; gap: 1rem; font-size: .8rem; color: var(--muted); justify-content: center; }
+    .ff-legend .dot { display: inline-block; width: .9rem; height: .2rem; border-radius: 2px; margin-right: .35rem; vertical-align: middle; }
+    .ff-legend .dot.direct { background: var(--direct); }
+    .ff-legend .dot.transform { background: var(--transform); }
+    .ff-legend .dot.computed { background: var(--computed); }
+
+    .field-flow .ff-fields li { cursor: pointer; transition: opacity .12s, background .12s; }
+    .field-flow .link { transition: opacity .12s, stroke-width .12s; }
+    .field-flow.highlighting .link:not(.hl) { opacity: .12; }
+    .field-flow.highlighting .link.hl { stroke-width: 0.11; }
+    .field-flow.highlighting .ff-fields li:not(.hl) { opacity: .35; }
+    .field-flow.highlighting .ff-fields li.hl { background: var(--surface-2); }
+
+    @media (max-width: 720px) {
+      .field-flow { grid-template-columns: 1fr; grid-template-rows: none; }
+      .field-flow > * { grid-column: 1; grid-row: auto; }
+      .ff-connectors, .ff-legend { display: none; }
+    }
+
+    .type-pill { display: inline-block; font-size: .65rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid currentColor; text-transform: lowercase; line-height: 1.4; }
+    .type-pill.str { color: var(--type-str); }
+    .type-pill.num { color: var(--type-num); }
+    .type-pill.bool { color: var(--type-bool); }
+    .type-pill.null { color: var(--type-null); }
+    .type-pill.required { color: var(--required); }
+    .type-pill.optional { color: var(--optional); }
+
+    .mapping-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .85rem; }
+    .mapping-list .mapping { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; padding: 1.1rem 1.3rem; display: flex; flex-direction: column; gap: .75rem; }
+    .mapping-list .mapping.direct    { border-left-color: var(--direct); }
+    .mapping-list .mapping.transform { border-left-color: var(--transform); }
+    .mapping-list .mapping.computed  { border-left-color: var(--computed); }
+    .m-summary { margin: 0; font-size: .95rem; line-height: 1.5; color: var(--fg); }
+    .m-summary code { background: var(--surface-2); }
+    .m-detail { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr) auto minmax(0, 1fr); align-items: center; gap: .65rem; font-size: .82rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: .65rem; }
+    .m-detail .m-source, .m-detail .m-target { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+    .m-detail .m-source { align-items: flex-end; }
+    .m-detail code { word-break: break-all; max-width: 100%; font-size: .78rem; }
+    .m-detail .m-arrow { color: var(--muted); font-weight: 600; }
+    .m-detail .m-op { display: flex; flex-wrap: wrap; gap: .3rem; justify-content: center; }
+    .m-note { color: var(--muted); font-size: .85rem; line-height: 1.45; margin: 0; }
+    .op-chip { display: inline-block; font-size: .78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: .12rem .45rem; }
+    @media (max-width: 720px) {
+      .m-detail { grid-template-columns: 1fr; gap: .35rem; }
+      .m-detail .m-source { align-items: flex-start; }
+      .m-detail .m-arrow { display: none; }
+    }
+
+    .example-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    @media (max-width: 720px) { .example-grid { grid-template-columns: 1fr; } }
+    .example figure { margin: 0; }
+    .example figcaption { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: .25rem; }
+    .example pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .85rem 1rem; overflow-x: auto; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
+
+    .callout { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); padding: .75rem 1rem; border-radius: 6px; margin: .5rem 0; }
+    .callout.warning { border-left-color: var(--transform); }
+    .callout.error { border-left-color: var(--required); }
+    .callout h4 { margin: 0 0 .25rem; font-size: .9rem; }
+    .callout p { margin: 0; }
+  </style>
+</head>
+<body>
+  <input type="checkbox" id="show-tech" class="toggle-tech">
+  <div class="container">
+
+    <!-- Section 1: Header -->
+    <header class="page-head">
+      <div class="title-block">
+        <h1>End-User Request → Avalara 1099 Get Issuers</h1>
+        <p class="subtitle">Webhook-triggered synchronous integration — returns a paginated list of tax issuers</p>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi"><span class="kpi-value">3</span><span class="kpi-label">input fields</span></div>
+        <div class="kpi"><span class="kpi-value">3</span><span class="kpi-label">fields mapped</span></div>
+        <div class="kpi"><span class="kpi-value">1</span><span class="kpi-label">transformation</span></div>
+        <div class="kpi"><span class="kpi-value">3</span><span class="kpi-label">validation rules</span></div>
+      </div>
+      <ol class="timeline">
+        <li class="timeline-step trigger">
+          <span class="step-kind">Trigger</span>
+          <span class="step-name">Webhook · POST /webhooks/get-issuers</span>
+        </li>
+        <li class="timeline-step filter">
+          <span class="step-kind">Validate</span>
+          <span class="step-name">Assert all 3 inputs present</span>
+        </li>
+        <li class="timeline-step action">
+          <span class="step-kind">API Call</span>
+          <span class="step-name">Avalara 1099 · ListIssuers</span>
+        </li>
+      </ol>
+    </header>
+
+    <!-- Section 1.5: Toggle -->
+    <div class="doc-toolbar">
+      <label for="show-tech" class="toggle-tech-label">
+        <span class="toggle-thumb"></span>
+        <span>Show technical detail</span>
+      </label>
+    </div>
+
+    <!-- Section 2: Overview -->
+    <section class="overview">
+      <h2>Overview</h2>
+      <p>
+        This integration acts as a secure pass-through API endpoint. A caller — typically a front-end application or another service — sends a single HTTP request containing their own bearer token, the tax year they want issuers for, and a unique request identifier. The integration validates that all three inputs are present, then calls the Avalara 1099 service on the caller's behalf to retrieve a paginated list of registered tax issuers for that year. The full response is returned synchronously, so the caller receives the issuer data directly in the HTTP reply without any polling.
+      </p>
+    </section>
+
+    <!-- Section 3: Field flow -->
+    <section class="field-flow-section">
+      <h2>Field flow</h2>
+      <div class="field-flow" style="--ff-height: 108px">
+        <h3 class="ff-head ff-head-source">Source · Webhook request body</h3>
+        <ol class="ff-fields ff-source">
+          <li data-row="0">bearerToken <span class="type-pill str">string</span></li>
+          <li data-row="1">taxYear <span class="type-pill num">number</span></li>
+          <li data-row="2">xCorrelationId <span class="type-pill str">string</span></li>
+        </ol>
+        <h3 class="ff-head ff-head-target">Target · Avalara API request</h3>
+        <ol class="ff-fields ff-target">
+          <li data-row="0">Authorization header <span class="type-pill str">string</span></li>
+          <li data-row="1">$filter query param <span class="type-pill str">string</span></li>
+          <li data-row="2">X-Correlation-Id header <span class="type-pill str">string</span></li>
+        </ol>
+        <svg class="ff-connectors" viewBox="0 0 100 3" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M 0 0.5 C 50 0.5, 50 0.5, 100 0.5" class="link direct"    data-src="0" data-tgt="0"/>
+          <path d="M 0 1.5 C 50 1.5, 50 1.5, 100 1.5" class="link transform" data-src="1" data-tgt="1"/>
+          <path d="M 0 2.5 C 50 2.5, 50 2.5, 100 2.5" class="link direct"    data-src="2" data-tgt="2"/>
+        </svg>
+        <ul class="ff-legend">
+          <li><span class="dot direct"></span>direct copy</li>
+          <li><span class="dot transform"></span>transformed</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Section 4: Mapping cards -->
+    <section class="mappings">
+      <h2>Field mappings</h2>
+      <ul class="mapping-list">
+
+        <li class="mapping direct">
+          <p class="m-summary">The caller's bearer token is forwarded directly as the authorization credential for the Avalara API call, so the request runs under the caller's own identity.</p>
+          <div class="m-detail">
+            <span class="m-source"><code>bearerToken</code></span>
+            <span class="m-arrow">→</span>
+            <span class="m-op"><span class="op-chip">direct copy</span></span>
+            <span class="m-arrow">→</span>
+            <span class="m-target"><code>Authorization</code> header</span>
+          </div>
+          <p class="m-note">The value must already include the <code>Bearer </code> prefix (e.g. <code>Bearer eyJ…</code>). The integration does not add the prefix itself.</p>
+        </li>
+
+        <li class="mapping transform">
+          <p class="m-summary">The requested tax year is turned into a server-side filter so that Avalara returns only issuers registered for that specific year, rather than all issuers.</p>
+          <div class="m-detail">
+            <span class="m-source"><code>taxYear</code></span>
+            <span class="m-arrow">→</span>
+            <span class="m-op"><span class="op-chip">format("taxYear eq {taxYear}")</span></span>
+            <span class="m-arrow">→</span>
+            <span class="m-target"><code>$filter</code> query param</span>
+          </div>
+          <p class="m-note">The filter follows OData v4 syntax, which is the query language Avalara's 1099 API uses. Sending an invalid year value (e.g. a string) will result in an Avalara API error.</p>
+        </li>
+
+        <li class="mapping direct">
+          <p class="m-summary">The caller's unique request identifier is passed through to Avalara unchanged, making it possible to trace a specific request end-to-end across both systems using the same ID.</p>
+          <div class="m-detail">
+            <span class="m-source"><code>xCorrelationId</code></span>
+            <span class="m-arrow">→</span>
+            <span class="m-op"><span class="op-chip">direct copy</span></span>
+            <span class="m-arrow">→</span>
+            <span class="m-target"><code>X-Correlation-Id</code> header</span>
+          </div>
+        </li>
+
+      </ul>
+    </section>
+
+    <!-- Section 5: Worked example -->
+    <section class="example">
+      <h2>Example payload</h2>
+      <div class="example-grid">
+        <figure>
+          <figcaption>Source · webhook request body</figcaption>
+          <pre><code>{
+  "bearerToken": "Bearer eyJhbGciOiJSUzI1NiJ9.example",
+  "taxYear": 2024,
+  "xCorrelationId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}</code></pre>
+        </figure>
+        <figure>
+          <figcaption>Target · Avalara 1099 API request</figcaption>
+          <pre><code>GET /1099/issuers?%24filter=taxYear+eq+2024
+
+Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.example
+avalara-version: 2.0
+X-Correlation-Id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+Accept: application/json</code></pre>
+        </figure>
+        <figure>
+          <figcaption>Response returned to caller</figcaption>
+          <pre><code>{
+  "value": [
+    {
+      "id": "issuer-001",
+      "name": "Acme Financial Corp",
+      "tin": "12-3456789",
+      "taxYear": 2024
+    }
+  ],
+  "count": 1,
+  "nextLink": null
+}</code></pre>
+        </figure>
+      </div>
+    </section>
+
+    <!-- Section 6: Notes, validation, error handling -->
+    <section class="callouts">
+      <h2>Notes</h2>
+
+      <div class="callout warning">
+        <h4>Validation — all three inputs are required</h4>
+        <p>The integration checks for <code>bearerToken</code>, <code>taxYear</code>, and <code>xCorrelationId</code> before making any outbound call. If any field is missing or null, the webhook returns an error immediately without calling Avalara.</p>
+      </div>
+
+      <div class="callout warning">
+        <h4>Bearer token format</h4>
+        <p>The <code>bearerToken</code> field must include the <code>Bearer </code> prefix as part of its value. The integration forwards it verbatim to the <code>Authorization</code> header — it does not prepend the prefix automatically.</p>
+      </div>
+
+      <div class="callout error">
+        <h4>Error handling — Avalara API failures</h4>
+        <p>If Avalara returns any non-successful HTTP status (4xx or 5xx), the integration logs the status code and response body, then re-throws the error. The caller receives a failed response with the Avalara error details. There is no automatic retry.</p>
+      </div>
+
+      <div class="callout">
+        <h4>Synchronous response</h4>
+        <p>The webhook is configured in sync mode, meaning the HTTP connection to the caller is held open until the Avalara API call completes. The caller receives the issuer list (or an error) directly in the response body — no polling or webhooks back to the caller are required.</p>
+      </div>
+
+      <div class="callout">
+        <h4>Pagination</h4>
+        <p>Avalara may return a <code>nextLink</code> field in the response if there are more issuers than fit in a single page. The integration returns this link to the caller as-is; following it for subsequent pages is the caller's responsibility.</p>
+      </div>
+    </section>
+
+  </div>
+  <script>
+    (function() {
+      var flow = document.querySelector('.field-flow');
+      if (!flow) return;
+      var links = flow.querySelectorAll('.link');
+      var srcRows = flow.querySelectorAll('.ff-source li');
+      var tgtRows = flow.querySelectorAll('.ff-target li');
+      function clearAll() {
+        flow.classList.remove('highlighting');
+        [].forEach.call(flow.querySelectorAll('.hl'), function(el) { el.classList.remove('hl'); });
+      }
+      function highlight(side, row) {
+        clearAll();
+        flow.classList.add('highlighting');
+        var attr = side === 'src' ? 'data-src' : 'data-tgt';
+        var matchedLinks = [].filter.call(links, function(l) { return l.getAttribute(attr) === row; });
+        matchedLinks.forEach(function(l) {
+          l.classList.add('hl');
+          var s = l.getAttribute('data-src');
+          var t = l.getAttribute('data-tgt');
+          [].forEach.call(flow.querySelectorAll('.ff-source li[data-row="' + s + '"]'), function(el) { el.classList.add('hl'); });
+          [].forEach.call(flow.querySelectorAll('.ff-target li[data-row="' + t + '"]'), function(el) { el.classList.add('hl'); });
+        });
+      }
+      [].forEach.call(srcRows, function(r) {
+        r.addEventListener('mouseenter', function() { highlight('src', r.getAttribute('data-row')); });
+        r.addEventListener('mouseleave', clearAll);
+      });
+      [].forEach.call(tgtRows, function(r) {
+        r.addEventListener('mouseenter', function() { highlight('tgt', r.getAttribute('data-row')); });
+        r.addEventListener('mouseleave', clearAll);
+      });
+    })();
+  </script>
+</body>
+</html>
