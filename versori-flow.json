@@ -6,34 +6,35 @@
       "position": { "x": 300, "y": 50 },
       "data": {
         "id": "get-issuers",
-        "label": "get-issuers",
-        "description": "Synchronous webhook trigger that accepts a POST request containing a bearer token, tax year, and correlation ID supplied by the end user. The integration runs the full pipeline inline and returns the Avalara issuers response directly to the caller.",
+        "label": "GET /get-issuers (Webhook)",
+        "description": "Sync webhook that acts as the integration entry point. It accepts inbound HTTP requests and triggers the GetIssuers pipeline, forwarding a response back to the caller once all downstream steps have completed.",
         "nodeKind": "webhook",
         "files": ["src/workflows/get-issuers.ts"],
         "position": { "x": 300, "y": 50 },
         "steps": [
-          "Listens for POST requests at /webhooks/get-issuers",
-          "Expects a JSON body with bearerToken, taxYear, and xCorrelationId",
-          "Runs in sync response mode — the HTTP response is held open until the pipeline completes"
+          "Exposes a public HTTPS endpoint on the Versori platform",
+          "Operates in sync (request-reply) mode — the caller waits for a response",
+          "CORS is enabled, permitting cross-origin browser requests",
+          "Routes execution into the read-variables step before any external call is made"
         ]
       }
     },
     {
-      "id": "validate-input",
+      "id": "read-variables",
       "type": "baseNode",
       "position": { "x": 300, "y": 125 },
       "data": {
-        "id": "validate-input",
-        "label": "validate-input",
-        "description": "Guards downstream steps by asserting all three required fields are present in the request body. Any missing field causes an immediate error that propagates back to the caller as a failed sync response.",
+        "id": "read-variables",
+        "label": "Read & Validate Variables",
+        "description": "Reads the three required integration variables — bearerToken, taxYear, and xCorrelationId — from the platform activation context and validates that none are missing. A missing variable causes the workflow to abort with a descriptive error before any external call is attempted.",
         "nodeKind": "action",
         "files": ["src/workflows/get-issuers.ts"],
         "position": { "x": 300, "y": 125 },
         "steps": [
-          "Reads bearerToken, taxYear, and xCorrelationId from the webhook request body",
-          "Throws a descriptive error if any field is absent or null",
-          "Logs the validated taxYear and xCorrelationId at info level",
-          "Returns the typed GetIssuersRequest object for the next step"
+          "Reads bearerToken, taxYear, and xCorrelationId from integration variables",
+          "Throws a descriptive error if any required variable is absent",
+          "Logs resolved taxYear and xCorrelationId for audit purposes",
+          "Passes the validated variable set to the downstream HTTP step"
         ]
       }
     },
@@ -43,23 +44,31 @@
       "position": { "x": 300, "y": 200 },
       "data": {
         "id": "call-avalara-get-issuers",
-        "label": "call-avalara-get-issuers",
-        "description": "Makes an authenticated GET request to the Avalara 1099 ListIssuers endpoint using the avalara_1099 connection. The caller-supplied bearer token overrides the connection-level auth, and results are filtered server-side to the requested tax year.",
+        "label": "Call Avalara — ListIssuers",
+        "description": "Performs a GET request to the Avalara 1099 ListIssuers endpoint via the avalara_1099_api connection, applying taxYear as an OData $filter and attaching the bearer token and correlation ID as headers. On a non-2xx response the full error body is captured and surfaced as a workflow error; on success the paginated issuer list is returned directly to the webhook caller.",
         "nodeKind": "request",
         "files": ["src/workflows/get-issuers.ts"],
         "position": { "x": 300, "y": 200 },
         "steps": [
-          "Builds the URL /1099/issuers?$filter=taxYear eq {taxYear} using an OData filter",
-          "Sets Authorization header to the caller-supplied bearerToken (must include 'Bearer ' prefix)",
-          "Sets avalara-version: 2.0 and X-Correlation-Id headers",
-          "Throws a descriptive error on any non-2xx response, including the status code and body",
-          "Returns the parsed PaginatedIssuersResponse (value[], count, nextLink) to the webhook caller"
+          "Builds query string: $filter=taxYear eq {taxYear}&$count=true",
+          "Sets Authorization: Bearer {bearerToken}, avalara-version: 2.0, and X-Correlation-Id headers",
+          "Executes GET /avalara1099/1099/issuers via the avalara_1099_api connection",
+          "On error: logs HTTP status + body and throws to abort the workflow",
+          "On success: returns the raw PaginatedIssuersResult (value[], @recordSetCount, @nextLink) to the caller"
         ]
       }
     }
   ],
   "edges": [
-    { "id": "get-issuers-to-validate-input", "source": "get-issuers", "target": "validate-input" },
-    { "id": "validate-input-to-call-avalara-get-issuers", "source": "validate-input", "target": "call-avalara-get-issuers" }
+    {
+      "id": "get-issuers-to-read-variables",
+      "source": "get-issuers",
+      "target": "read-variables"
+    },
+    {
+      "id": "read-variables-to-call-avalara-get-issuers",
+      "source": "read-variables",
+      "target": "call-avalara-get-issuers"
+    }
   ]
 }

@@ -1,111 +1,97 @@
 import { webhook, fn, http } from '@versori/run';
-import type { GetIssuersRequest, PaginatedIssuersResponse } from '../types/issuers';
-
-interface ApiResponse<T = unknown> {
-  success: boolean;
-  status: number;
-  data?: T;
-  error?: string;
-}
+import type { GetIssuersVariables, PaginatedIssuersResult } from '../types/issuers';
 
 /**
- * Webhook: POST /webhooks/get-issuers
+ * Sync webhook — acts as a transparent proxy to the Avalara 1099 ListIssuers endpoint.
  *
- * Expected request body:
- * {
- *   "bearerToken":    "Bearer <token>",   // full value including 'Bearer ' prefix
- *   "taxYear":        2024,
- *   "xCorrelationId": "uuid-v4-string"
- * }
+ * Required integration variables (set in the platform UI):
+ *   • bearerToken   — OAuth 2.0 bearer token supplied by the end user / calling system
+ *   • taxYear       — Tax year to filter issuers by (e.g. 2024)
+ *   • xCorrelationId — Unique GUID for request tracing / audit
  *
- * The integration calls Avalara 1099 ListIssuers (GET /1099/issuers)
- * using the supplied bearer token, and returns the paginated issuers list
- * synchronously to the caller.
+ * The caller receives the raw Avalara paginated issuer list as the HTTP response.
  */
 export const getIssuersWebhook = webhook('get-issuers', {
   response: { mode: 'sync' },
+  cors: true,
 })
+  // ── Step 1: Read & validate integration variables ─────────────────────────
   .then(
-    fn('validate-input', ({ data, log }) => {
-      const body = data?.body as Partial<GetIssuersRequest> | undefined;
-			
-			log.info("Request Body", body);
-			
-      if (!body?.bearerToken) {
-        throw new Error('Missing required field: bearerToken');
+    fn('read-variables', ({ activation, log }) => {
+      const bearerToken = activation.getVariable('bearerToken') as string | undefined;
+      const taxYear = activation.getVariable('taxYear') as number | undefined;
+      const xCorrelationId = activation.getVariable('xCorrelationId') as string | undefined;
+
+      if (!bearerToken) {
+        throw new Error('Integration variable "bearerToken" is required but not set.');
       }
-      if (body.taxYear === undefined || body.taxYear === null) {
-        throw new Error('Missing required field: taxYear');
+      if (!taxYear) {
+        throw new Error('Integration variable "taxYear" is required but not set.');
       }
-      if (!body.xCorrelationId) {
-        throw new Error('Missing required field: xCorrelationId');
+      if (!xCorrelationId) {
+        throw new Error('Integration variable "xCorrelationId" is required but not set.');
       }
 
-      log.info('Input validated', { taxYear: body.taxYear, xCorrelationId: body.xCorrelationId });
+      log.info('GetIssuers — variables resolved', { taxYear, xCorrelationId });
 
-      return {
-        bearerToken: body.bearerToken,
-        taxYear: body.taxYear,
-        xCorrelationId: body.xCorrelationId,
-      } satisfies GetIssuersRequest;
+      return { bearerToken, taxYear, xCorrelationId } satisfies GetIssuersVariables;
     })
   )
+  // ── Step 2: Call Avalara 1099 ListIssuers ─────────────────────────────────
   .then(
-    http('call-avalara-get-issuers', { connection: 'avalara_1099' }, async ({ fetch, data, log }) => {
-      const { bearerToken, taxYear, xCorrelationId } = data as GetIssuersRequest;
+    http(
+      'call-avalara-get-issuers',
+      { connection: 'avalara_1099_api' },
+      async ({ fetch, data, log }): Promise<PaginatedIssuersResult> => {
+        const { bearerToken, taxYear, xCorrelationId } = data as GetIssuersVariables;
 
-      // Build query: filter issuers by taxYear, pin API version to 2.0
-      const params = new URLSearchParams({
-        $filter: `taxYear eq ${taxYear}`,
-      });
+        // taxYear is a filterable field on /1099/issuers
+        // ref: https://github.com/avadev/Avalara-SDK-DotNet/blob/main/docs/A1099/V2/Class1099IssuersApi.md
+        const params = new URLSearchParams({
+          $filter: `taxYear eq ${taxYear}`,
+          $count: 'true',
+        });
 
-      log.info('Calling Avalara 1099 ListIssuers', { taxYear, xCorrelationId });
+        log.info('Calling Avalara 1099 ListIssuers', {
+          taxYear,
+          xCorrelationId,
+          filter: params.get('$filter'),
+        });
 
-      const response = await fetch(`/1099/issuers?${params.toString()}`, {
-        method: 'GET',
-        headers: {
-          // Override the connection-level auth with the caller-supplied bearer token.
-          // The platform stores API-key secrets verbatim, so the caller must include
-          // the 'Bearer ' prefix in bearerToken.
-          Authorization: bearerToken,
-          'avalara-version': '2.0',
-          'X-Correlation-Id': xCorrelationId,
-          Accept: 'application/json',
-        },
-      });
+        const response = await fetch(`/avalara1099/1099/issuers?${params.toString()}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            'avalara-version': '2.0',
+            'X-Correlation-Id': xCorrelationId,
+            Accept: 'application/json',
+          },
+        });
 
-      if (!response.ok) {
-        const errorBody = await response.text();
-        log.error('Avalara API error', { status: response.status, body: errorBody });
+        if (!response.ok) {
+          const errorBody = await response.text();
+          log.error('Avalara ListIssuers request failed', {
+            status: response.status,
+            statusText: response.statusText,
+            body: errorBody,
+          });
+          throw new Error(
+            `Avalara GetIssuers failed: ${response.status} ${response.statusText} — ${errorBody}`
+          );
+        }
 
-        // Return a structured error envelope — do NOT throw, so the sync webhook
-        // delivers this payload to the caller instead of an uncontrolled failure.
-        return {
-          success: false,
-          status: response.status,
-          error: errorBody,
-        } satisfies ApiResponse;
+        const result: PaginatedIssuersResult = await response.json();
+
+        log.info('Avalara GetIssuers succeeded', {
+          recordSetCount: result['@recordSetCount'] ?? 'n/a',
+          returnedCount: result.value?.length ?? 0,
+        });
+
+        return result;
       }
-
-      const result: PaginatedIssuersResponse = await response.json();
-      log.info('ListIssuers succeeded', { count: result.count ?? result.value?.length ?? 0 });
-
-      // Return a structured success envelope.
-      return {
-        success: true,
-        status: response.status,
-        data: result,
-      } satisfies ApiResponse<PaginatedIssuersResponse>;
-    })
+    )
   )
+  // ── Error handler ─────────────────────────────────────────────────────────
   .catch((ctx) => {
-    // Catches validation errors and any unexpected failures.
-    // Return a structured envelope so the caller always receives consistent JSON.
-    const message = ctx.data instanceof Error ? ctx.data.message : String(ctx.data);
-    ctx.log.error('get-issuers workflow failed', { error: message });
-    return {
-      success: false,
-      status: 500,
-      error: message,
-    } satisfies ApiResponse;
+    ctx.log.error('GetIssuers webhook failed', { error: String(ctx.data) });
   });
